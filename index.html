@@ -1,0 +1,410 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Goal Generation for World Models</title>
+<meta name="description" content="Master's thesis at TU Dortmund University: a robot reaches goals given in words by turning them into goal images of its own scene and planning towards them in a learned world model.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Goal Generation for World Models">
+<meta property="og:description" content="Master's thesis at TU Dortmund University: a robot reaches goals given in words by turning them into goal images of its own scene and planning towards them in a learned world model.">
+<meta property="og:url" content="https://tobygitt.github.io/thesis-page/">
+<meta property="og:image" content="https://tobygitt.github.io/thesis-page/assets/og.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<!-- 1 · Introduction: title, date, the demonstrations, the question and the three steps -->
+<div class="band">
+  <div class="wrap">
+    <header class="hero">
+      <div class="hero-text">
+        <p class="eyebrow">Master's thesis</p>
+        <h1>Goal Generation for World Models</h1>
+        <p class="tag">Updated 28 October 2026 · results are preliminary until the thesis is submitted</p>
+        <p class="lede">In real applications, we often want to state a task in natural language, spoken or written. Unlike humans, however, a robot does not natively operate on natural language. This thesis turns an instruction in natural language into goals that the agent can understand and reach with a learned world model.</p>
+      </div>
+      <figure class="demos panel" aria-label="Three recorded demonstrations, one at a time">
+        <div class="demo-stage">
+          <video class="media" src="assets/demo-microwave-kettle.mp4" poster="assets/demo-microwave-kettle.jpg" width="912" height="912" autoplay muted playsinline aria-label="A recorded demonstration: the arm opens the microwave, then moves the kettle to the top-left burner.">The arm opens the microwave, then moves the kettle.</video>
+          <video class="media" src="assets/demo-burner-light.mp4" poster="assets/demo-burner-light.jpg" width="912" height="912" muted playsinline preload="none" hidden aria-label="A recorded demonstration: the arm turns the bottom burner's knob, then flips the light switch.">The arm turns on the bottom burner, then the light.</video>
+          <video class="media" src="assets/demo-cabinets.mp4" poster="assets/demo-cabinets.jpg" width="912" height="912" muted playsinline preload="none" hidden aria-label="A recorded demonstration: the arm slides the cabinet door open, then opens the hinged cabinet door.">The arm opens the slide cabinet, then the hinge cabinet.</video>
+        </div>
+        <div class="demo-side">
+          <p class="eyebrow">The setting</p>
+          <p class="demo-about">Human demonstrations in FrankaKitchen, a simulated kitchen with a Franka arm and seven tasks, shown in real time.</p>
+          <ol class="demo-list">
+            <li><button type="button" aria-pressed="true"><span class="n">1</span>microwave, then kettle</button></li>
+            <li><button type="button" aria-pressed="false"><span class="n">2</span>bottom burner, then light switch</button></li>
+            <li><button type="button" aria-pressed="false"><span class="n">3</span>slide cabinet, then hinge cabinet</button></li>
+          </ol>
+        </div>
+      </figure>
+    </header>
+
+    <section class="question" aria-labelledby="question-title">
+      <div class="question-head">
+        <p class="eyebrow" id="question-title">The question</p>
+        <p class="question-text">How can an agent use language and the prior knowledge of foundation models to reach a goal it has never encountered?</p>
+      </div>
+      <ol class="map">
+        <li><a href="#decompose"><span class="map-name"><span class="n">1</span>Decompose</span><span class="map-line">A vision-language model breaks a complex instruction into reachable subtasks.</span></a></li>
+        <li><a href="#specify"><span class="map-name"><span class="n">2</span>Specify</span><span class="map-line">An image generator draws each subtask's outcome as a goal image.</span></a></li>
+        <li><a href="#reach"><span class="map-name"><span class="n">3</span>Reach</span><span class="map-line">A planner reaches them in a learned world model.</span></a></li>
+      </ol>
+    </section>
+  </div>
+</div>
+
+<!-- 2 · Step 1, decompose -->
+<section class="band band-alt" id="decompose" aria-labelledby="decompose-title">
+  <div class="wrap section">
+    <div class="section-head">
+      <p class="eyebrow">Step 1 · Decompose</p>
+      <h2 id="decompose-title">The instruction becomes target states, in the order it asks for</h2>
+    </div>
+    <div class="facets">
+      <div class="facet">
+        <p class="eyebrow">Intuition</p>
+        <p>The vision-language model does the thinking: it breaks the instruction into subtasks. Hierarchical reinforcement learning often splits a task by time, with a new subgoal every few steps, however hard or easy each stretch is. But every subgoal costs a generated image in step 2, so the split should follow difficulty instead: more subgoals where the task is hard, fewer where it is easy. That takes reasoning about the instruction and the scene together, which vision-language models do well.</p>
+      </div>
+      <div class="facet">
+        <p class="eyebrow">In this thesis</p>
+        <p>The hard part of each task is handling the object, so the model writes two target states per task: the gripper at the object, then the task done. The order comes from the words, and a task the image already shows as done needs no states. Whether one state per task does as well is being tested, and a later test lets the model choose the states itself.</p>
+      </div>
+    </div>
+    <figure class="flow">
+      <div class="flow-in">
+        <div class="flow-image">
+          <img class="media" src="assets/now.jpg" width="1056" height="1056" alt="The kitchen at the start of the task, the image the model was given.">
+          <p class="tag">the current image</p>
+        </div>
+        <blockquote class="flow-instruction quote"><p>Open the microwave,<br>then move the kettle to the top left burner.</p></blockquote>
+        <p class="flow-arrow"></p>
+        <p class="flow-arrow"></p>
+      </div>
+      <p class="flow-model">Qwen3.5-9B<span>vision-language model</span></p>
+      <p class="flow-arrow"></p>
+      <div class="flow-out panel">
+        <div class="flow-group">
+          <p class="group">microwave</p>
+          <ol><li><span class="n">1</span>the gripper holds the handle of the microwave door</li><li><span class="n">2</span>the microwave door is open</li></ol>
+        </div>
+        <div class="flow-group">
+          <p class="group">kettle</p>
+          <ol><li><span class="n">3</span>the gripper holds the kettle</li><li><span class="n">4</span>the kettle is on the top left burner</li></ol>
+        </div>
+      </div>
+    </figure>
+  </div>
+</section>
+
+<!-- 3 · Step 2, specify -->
+<section class="band" id="specify" aria-labelledby="specify-title">
+  <div class="wrap section">
+    <div class="section-head">
+      <p class="eyebrow">Step 2 · Specify</p>
+      <h2 id="specify-title">Each target state becomes a goal image of this very scene</h2>
+    </div>
+    <div class="facets">
+      <div class="facet">
+        <p class="eyebrow">Intuition</p>
+        <p>A goal image is a target the robot can compare with what its camera sees, at every step. A generator pretrained on billions of images already knows what “open” or “on” looks like, so it only has to learn what this kitchen looks like.</p>
+      </div>
+      <div class="facet">
+        <p class="eyebrow">In this thesis</p>
+        <p>An adapter trained on this kitchen teaches the generator the scene. Given the current image and one target state, the generator draws the goal image of the same scene. Whether it draws the right outcome, also for unseen scenes and wordings, is being tested.</p>
+      </div>
+    </div>
+    <figure class="flow">
+      <div class="flow-in">
+        <div class="flow-image">
+          <img class="media" src="assets/specify-current.jpg" width="672" height="672" alt="The current image: microwave closed, the gripper at its handle.">
+          <p class="tag">the current image</p>
+        </div>
+        <blockquote class="flow-instruction quote"><p>the microwave's door is open</p></blockquote>
+        <p class="flow-arrow"></p>
+        <p class="flow-arrow"></p>
+      </div>
+      <p class="flow-model">FLUX.2 [klein] 4B + kitchen adapter<span>diffusion image-editing model</span></p>
+      <p class="flow-arrow"></p>
+      <div class="flow-out-row">
+        <div class="flow-out flow-out-single panel">
+          <img class="media" src="assets/specify-generated.jpg" width="672" height="672" alt="The generated goal: the microwave door open, drawn by the adapted generator.">
+          <p class="tag">generated goal</p>
+        </div>
+        <div class="flow-aside">
+          <img class="media" src="assets/specify-recorded.jpg" width="672" height="672" alt="The recorded goal: the microwave door open.">
+          <p class="tag">recorded goal, for comparison</p>
+        </div>
+      </div>
+      <figcaption class="caption">Shown at the models' resolution of 224 pixels.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- 4 · Step 3, reach -->
+<section class="band band-alt" id="reach" aria-labelledby="reach-title">
+  <div class="wrap section">
+    <div class="section-head">
+      <p class="eyebrow">Step 3 · Reach</p>
+      <h2 id="reach-title">A planner searches a learned world model for the way to each goal image</h2>
+    </div>
+    <div class="facets">
+      <div class="facet">
+        <p class="eyebrow">Intuition</p>
+        <p>A world model predicts how the scene responds to actions, whatever the goal. A planner can search it at run time for the actions that lead to a new goal image, without any training for that goal.</p>
+      </div>
+      <div class="facet">
+        <p class="eyebrow">In this thesis</p>
+        <p>The world model predicts how the scene's DINOv2 features change when the robot acts. The planner tries many plans in it, keeps those that end closest to the goal image and refines them. The robot executes the start of the best plan, then looks again and plans anew.</p>
+      </div>
+    </div>
+    <figure class="flow">
+      <div class="flow-in flow-in-pair">
+        <div class="flow-image">
+          <img class="media" src="assets/specify-current.jpg" width="672" height="672" alt="The current image: microwave closed, the gripper at its handle.">
+          <p class="tag">the current image</p>
+        </div>
+        <div class="flow-image">
+          <img class="media" src="assets/specify-generated.jpg" width="672" height="672" alt="The goal image: the microwave door open.">
+          <p class="tag">the goal image</p>
+        </div>
+        <p class="flow-arrow"><span>with the robot's joint values</span></p>
+        <p class="flow-arrow"></p>
+      </div>
+      <p class="flow-model">CEM over DINO-WM<span>planner</span></p>
+      <p class="flow-arrow"></p>
+      <p class="flow-out flow-out-text panel">The robot executes the best plan's first 0.4&nbsp;s, then plans again from the new image.</p>
+    </figure>
+
+    <div class="sub">
+      <div class="sub-head">
+        <p class="eyebrow">What went wrong first</p>
+        <h3>DINO-WM's objective failed in this kitchen</h3>
+      </div>
+      <div class="prose">
+        <p>DINO-WM scores a plan by the squared distance between its imagined outcome and the goal image, patch by patch, every patch counting the same:</p>
+        <img class="formula formula-display" src="assets/formula-patch-mse.svg" width="347" height="52" alt="c of z-hat and z_g equals one over P times D, times the sum over patches p and features d of the squared difference between the imagined end of the plan and the goal">
+        <p class="formula-legend"><i>ẑ</i><sub>t+H</sub>: the imagined end of a plan · <i>z</i><sub>g</sub>: the goal image · <i>P</i> = 256 patches of <i>D</i> = 768 features each</p>
+        <p>In FrankaKitchen, this failed in two ways:</p>
+        <ol class="failures">
+          <li><span class="n">1</span>The arm outweighed the task: turning a burner knob changed the distance as much as moving the arm by 0.3 to 1&nbsp;cm.</li>
+          <li><span class="n">2</span>The planner moved the gripper out of the camera's view instead of to the knob, even with the simulator as its model.</li>
+        </ol>
+      </div>
+      <figure class="hiding">
+        <div class="hiding-media">
+          <div class="view">
+            <p class="view-label">the planner</p>
+            <video class="media" src="assets/hiding.mp4" poster="assets/hiding.jpg" width="1152" height="1152" autoplay muted loop playsinline aria-label="The planner moves the gripper down and away from the knob until it leaves the camera's view.">The planner moves the gripper away from the knob and out of view.</video>
+          </div>
+          <div class="view">
+            <p class="view-label">its goal</p>
+            <img class="media" src="assets/hiding-goal.jpg" width="1152" height="1152" alt="Goal image: the gripper at the bottom burner's knob.">
+          </div>
+        </div>
+      </figure>
+      <div class="prose">
+        <p class="eyebrow">Why</p>
+        <p>Every patch counts the same, and the arm covers far more of them than a knob, so the arm's pose dominates the distance. A gripper in the wrong place is paid for twice, where it is and where the goal shows it; taking it out of view removes one of the two costs. No better world model could fix either.</p>
+      </div>
+    </div>
+
+    <div class="sub">
+      <div class="sub-head">
+        <p class="eyebrow">This thesis's objective</p>
+        <h3>The scene without the robot, the gripper by its position</h3>
+      </div>
+      <div class="objective panel">
+        <img class="formula formula-display" src="assets/formula-ours.svg" width="295" height="31" alt="c equals one half d_scene plus one half of d_hand plus d_fingers">
+        <ul class="terms">
+          <li><span class="term-name">scene</span><img class="formula" src="assets/formula-scene.svg" width="211" height="20" alt="d_scene equals the mean squared error between m of z-hat and m of z_g"><p>DINO-WM's patch distance, after a learned mapping <i>m</i> removes the robot from both images, so hiding the gripper gains nothing</p></li>
+          <li><span class="term-name">hand</span><img class="formula" src="assets/formula-hand.svg" width="190" height="20" alt="d_hand equals the norm of FK of q-hat minus h of z_g"><p>the plan's gripper position, from its joints <i>q̂</i> by forward kinematics, against the goal's, read from the goal image by a learned readout <i>h</i></p></li>
+          <li><span class="term-name">fingers</span><img class="formula" src="assets/formula-fingers.svg" width="162" height="21" alt="d_fingers equals the absolute difference between w-hat and w of z_g"><p>the plan's finger opening <i>ŵ</i> against the goal's, read from the goal image by <i>w</i></p></li>
+        </ul>
+        <p class="objective-result">With this objective, its terms computed exactly, the planner hid the gripper in <span class="good">0 of 14</span> episodes, against 6 of 14 with DINO-WM's distance.</p>
+      </div>
+    </div>
+
+    <figure class="sub">
+      <div class="sub-head">
+        <p class="eyebrow">With the new objective</p>
+        <h3>Goals the demonstrations show, and goals they never show</h3>
+      </div>
+      <p class="clips-label">In the demonstrations</p>
+      <ul class="clips">
+        <li>
+          <div class="clip">
+            <video class="media" src="assets/seen-microwave.mp4" poster="assets/seen-microwave.jpg" width="784" height="784" autoplay muted loop playsinline aria-label="The planner opens the microwave door.">The planner opens the microwave.</video>
+            <div class="inset"><img src="assets/seen-microwave-goal.jpg" width="384" height="384" alt="Goal image: the microwave open."><span>goal</span></div>
+          </div>
+          <p class="clip-label">Open the microwave<span>from the start every demonstration shares</span></p>
+        </li>
+        <li>
+          <div class="clip">
+            <video class="media" src="assets/seen-hinge.mp4" poster="assets/seen-hinge.jpg" width="784" height="784" autoplay muted loop playsinline aria-label="The planner pulls the hinged cabinet door open.">The planner opens the hinge door.</video>
+            <div class="inset"><img src="assets/seen-hinge-goal.jpg" width="384" height="384" alt="Goal image: the hinged cabinet door open."><span>goal</span></div>
+          </div>
+          <p class="clip-label">Open the hinge door<span>from where its demonstration began the task</span></p>
+        </li>
+        <li>
+          <div class="clip">
+            <video class="media" src="assets/seen-kettle.mp4" poster="assets/seen-kettle.jpg" width="784" height="784" autoplay muted loop playsinline aria-label="The planner moves the kettle to the top-left burner.">The planner moves the kettle to the top-left burner.</video>
+            <div class="inset"><img src="assets/seen-kettle-goal.jpg" width="384" height="384" alt="Goal image: the kettle on the top-left burner."><span>goal</span></div>
+          </div>
+          <p class="clip-label">Kettle to the top-left burner<span>where the demonstrations put it</span></p>
+        </li>
+      </ul>
+      <p class="clips-label">In no demonstration</p>
+      <ul class="clips">
+        <li>
+          <div class="clip">
+            <video class="media" src="assets/unseen-microwave.mp4" poster="assets/unseen-microwave.jpg" width="784" height="784" autoplay muted loop playsinline aria-label="The planner closes the open microwave door.">The planner closes the microwave.</video>
+            <div class="inset"><img src="assets/unseen-microwave-goal.jpg" width="384" height="384" alt="Goal image: the microwave closed."><span>goal</span></div>
+          </div>
+          <p class="clip-label">Close the microwave<span>from just after it was opened</span></p>
+        </li>
+        <li>
+          <div class="clip">
+            <video class="media" src="assets/unseen-hinge.mp4" poster="assets/unseen-hinge.jpg" width="784" height="784" autoplay muted loop playsinline aria-label="The planner pushes the hinged cabinet door shut.">The planner closes the hinge door.</video>
+            <div class="inset"><img src="assets/unseen-hinge-goal.jpg" width="384" height="384" alt="Goal image: the hinged cabinet door closed."><span>goal</span></div>
+          </div>
+          <p class="clip-label">Close the hinge door<span>from the arm's home pose</span></p>
+        </li>
+        <li>
+          <div class="clip">
+            <video class="media" src="assets/unseen-kettle.mp4" poster="assets/unseen-kettle.jpg" width="784" height="784" autoplay muted loop playsinline aria-label="The planner moves the kettle to the top-right burner.">The planner moves the kettle to the top-right burner.</video>
+            <div class="inset"><img src="assets/unseen-kettle-goal.jpg" width="384" height="384" alt="Goal image: the kettle on the top-right burner."><span>goal</span></div>
+          </div>
+          <p class="clip-label">Kettle to the top-right burner<span>where no demonstration puts it</span></p>
+        </li>
+      </ul>
+      <figcaption class="caption">The planner used the simulator in place of the learned world model, with the objective's terms computed exactly.</figcaption>
+    </figure>
+
+    <div class="sub">
+      <div class="sub-head">
+        <p class="eyebrow">The central comparison</p>
+        <h3>Planner or policy</h3>
+      </div>
+      <div class="split split-step">
+        <div class="prose">
+          <p>The policy is an achiever as in LEXA. It learns inside the same world model, with the same goals and objective, and answers in milliseconds; the planner searches for seconds.</p>
+          <p>All 603 demonstrations do their tasks in one fixed order, the microwave always first; none undoes a task, and none puts the kettle on a right-hand burner. The test goals move further from them in four levels, and the results will appear under <a href="#status">Where it stands</a>.</p>
+        </div>
+        <ol class="levels">
+          <li><span class="level-n">Level 1</span><span class="level-name">nothing new</span><span class="said">“after the microwave, move the kettle”</span></li>
+          <li><span class="level-n">Level 2</span><span class="level-name">a new context</span><span class="said">“open the microwave with the light already on”</span></li>
+          <li><span class="level-n">Level 3</span><span class="level-name">undo a task</span><span class="said">“close the microwave”</span></li>
+          <li><span class="level-n">Level 4</span><span class="level-name">a new outcome</span><span class="said">“move the kettle to the top right burner”</span></li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 5 · Where it stands: every number that changes lives here. When they change, update the date here, in the line below the title and in the colophon at the end -->
+<section class="band" id="status" aria-labelledby="status-title">
+  <div class="wrap section">
+    <div class="section-head">
+      <p class="eyebrow">Results</p>
+      <h2 id="status-title">Where it stands</h2>
+      <p>As of 28 October 2026: the main experiments run until 31 October, and every number here is preliminary.</p>
+    </div>
+    <dl class="status-list">
+      <div class="status-row headline">
+        <dt>Planner or policy</dt>
+        <dd class="chip chip-running">running</dd>
+        <dd class="status-text">The central comparison runs until 31 October; its results will appear here.</dd>
+      </div>
+      <div class="status-row">
+        <dt><span class="n">1</span>Decompose</dt>
+        <dd class="chip chip-ok">works</dd>
+        <dd class="status-text">The order was right in 8 of 8 instructions in a first pass. A task the image already shows as done is not yet dropped.</dd>
+      </div>
+      <div class="status-row">
+        <dt><span class="n">2</span>Specify</dt>
+        <dd class="chip chip-warn">needs work</dd>
+        <dd class="status-text">Adapted to the kitchen, the generator draws demonstrated goals. It puts the gripper about 10&nbsp;cm off, against 1.3&nbsp;cm for the true goal images, and outcomes never demonstrated can come out wrong.</dd>
+      </div>
+      <div class="status-row">
+        <dt><span class="n">3</span>Reach</dt>
+        <dd class="chip chip-progress">in progress</dd>
+        <dd class="status-text">With perfect dynamics, the planner completes 26 of 32 validation tasks and reaches goals no demonstration shows. Over the learned world model, a first look solved 1 of 6, because the model does not foresee bumps. It has been retrained with contact clips; planning over it is next.</dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<!-- About and references -->
+<footer class="band band-alt" aria-labelledby="about-title">
+  <div class="wrap section">
+    <div class="split split-about">
+      <div class="prose">
+        <p class="eyebrow">About</p>
+        <h2 id="about-title">Toby Teasdale</h2>
+        <p>Master's thesis at TU Dortmund University, 2026. The thesis and its code will be published with the submission.</p>
+        <dl class="contact">
+          <dt>GitHub</dt>
+          <dd><a href="https://github.com/TobyGitT">github.com/TobyGitT</a></dd>
+        </dl>
+        <p class="ai-note">Use of AI: I built this page and the thesis code with help from Claude, an AI assistant.</p>
+      </div>
+      <div class="prose">
+        <h3>Builds on</h3>
+        <ul class="refs">
+          <li><a href="https://arxiv.org/abs/2411.04983">DINO-WM</a><span>Zhou et al., 2024. World models on pre-trained visual features</span></li>
+          <li><a href="https://arxiv.org/abs/2110.09514">LEXA</a><span>Mendonca et al., 2021. Discovering and achieving goals via world models</span></li>
+          <li><a href="https://arxiv.org/abs/2304.07193">DINOv2</a><span>Oquab et al., 2023. Visual features without supervision</span></li>
+          <li><a href="https://arxiv.org/abs/1910.11956">FrankaKitchen</a><span>Gupta et al., 2019. Relay policy learning</span></li>
+          <li><a href="https://huggingface.co/black-forest-labs/FLUX.2-klein-base-4B">FLUX.2 [klein] 4B</a><span>Black Forest Labs</span></li>
+          <li><a href="https://huggingface.co/Qwen/Qwen3.5-9B">Qwen3.5-9B</a><span>Qwen team</span></li>
+        </ul>
+      </div>
+    </div>
+    <p class="colophon">Updated 28 October 2026 · results are preliminary until the thesis is submitted</p>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)");
+  if (!reduce || !reduce.matches) return;
+  document.querySelectorAll("video").forEach(function (v) {
+    v.removeAttribute("autoplay");
+    v.pause();
+    v.controls = true;
+  });
+})();
+
+// The demonstrations at the top: one at a time; the list switches them, and a clip that ends hands over to the next
+(function () {
+  var demos = document.querySelector(".demos");
+  var videos = demos.querySelectorAll("video");
+  var buttons = demos.querySelectorAll(".demo-list button");
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var current = 0;
+
+  function show(k) {
+    videos[current].pause();
+    videos[current].hidden = true;
+    buttons[current].setAttribute("aria-pressed", "false");
+    current = (k + videos.length) % videos.length;
+    videos[current].hidden = false;
+    buttons[current].setAttribute("aria-pressed", "true");
+    videos[current].currentTime = 0;
+    if (!reduce) videos[current].play().catch(function () {});
+  }
+
+  buttons.forEach(function (button, k) {
+    button.addEventListener("click", function () { show(k); });
+  });
+  videos.forEach(function (video) {
+    video.addEventListener("ended", function () { show(current + 1); });
+  });
+})();
+</script>
+</body>
+</html>
